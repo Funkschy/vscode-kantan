@@ -1,0 +1,5 @@
+node_modules
+.vscode/
+out/
+vscode-kantan-0.0.1.vsix
+

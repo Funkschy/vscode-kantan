@@ -1,0 +1,339 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Kantan",
+    "scopeName": "source.kan",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#statements"
+        }
+    ],
+    "repository": {
+        "statements": {
+            "patterns": [
+                {
+                    "include": "#imports"
+                },
+                {
+                    "include": "#extern-function-def"
+                },
+                {
+                    "include": "#function-def"
+                },
+                {
+                    "include": "#type-def"
+                },
+                {
+                    "include": "#var-decl"
+                },
+                {
+                    "include": "#delete"
+                },
+                {
+                    "include": "#return"
+                },
+                {
+                    "include": "#while"
+                },
+                {
+                    "include": "#if"
+                },
+                {
+                    "include": "#else"
+                },
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "expressions": {
+            "patterns": [
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#chars"
+                },
+                {
+                    "include": "#numbers"
+                }
+            ]
+        },
+        "comments": {
+			"patterns": [
+				{
+					"name": "comment.line.kantan",
+					"begin": "(\\/\\/)",
+					"beginCaptures": {
+						"1": {
+							"name": "punctuation.definition.comment.kantan"
+						}
+					},
+					"end": "(?:\\n|$)"
+				}
+			]
+        },
+        "imports": {
+            "begin": "\\b(import)\\b\\s+",
+            "end": "[;\n]",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.import.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#strings"
+                }
+            ]
+        },
+        "extern-function-def": {
+            "begin": "\\b(extern)\\b\\s*(\\bdef\\b)\\s*([A-Za-z][A-Za-z0-9_]*)",
+            "end": ":?\\s*(\\**[A-Za-z][A-Za-z0-9_]*)?;",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.extern.kantan"
+                },
+                "2": {
+                    "name": "keyword.def.kantan"
+                },
+                "3": {
+                    "name": "entity.name.function.kantan"
+                }
+            },
+            "endCaptures": {
+                "1": {
+                    "name": "entity.name.type.kantan"
+                }
+            }
+        },
+        "function-def": {
+            "begin": "^\\b(def)\\b\\s+([A-Za-z][A-Za-z0-9_]*)",
+            "end": "(:\\s*)?(\\**[A-Za-z][A-Za-z0-9_]*)?\\s*\\{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.def.kantan"
+                },
+                "2": {
+                    "name": "entity.name.function.kantan"
+                }
+            },
+            "endCaptures": {
+                "2": {
+                    "name": "entity.name.type.kantan"
+                }
+            }
+        },
+        "type-def": {
+            "begin": "\\b(type)\\b\\s+([A-Za-z][A-Za-z0-9_]*)",
+            "end": "\\b(struct)\\b\\s*\\{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.type.kantan"
+                },
+                "2": {
+                    "name": "entity.name.type.kantan"
+                }
+            },
+            "endCaptures": {
+                "1": {
+                    "name": "keyword.struct.kantan"
+                }
+            }
+        },
+        "var-decl": {
+            "begin": "\\b(let)\\b\\s+([A-Za-z][A-Za-z0-9_]*)",
+            "end": ";",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.let.kantan"
+                },
+                "2": {
+                    "name": "variable.name.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "delete": {
+            "begin": "\\b(delete)\\b",
+            "end": ";",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.delete.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "return": {
+            "begin": "\\b(return)\\b",
+            "end": ";",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.return.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "while": {
+            "begin": "\\b(while)\\b",
+            "end": "{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.while.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "if": {
+            "begin": "\\b(else)?\\b\\s*\\b(if)\\b",
+            "end": "{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.else.kantan"
+                },
+                "2": {
+                    "name": "keyword.if.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "else": {
+            "begin": "\\b(else)\\b",
+            "end": "{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.else.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.kantan",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.kantan",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "chars": {
+            "name": "string.quoted.single.kantan",
+            "begin": "'",
+            "end": "'|(?<!\\\\)(?=\\s*\\n)",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.kantan",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "numbers": {
+            "match": "\\b((\\d+\\.?\\d+)|(\\d+))\\b",
+            "name": "constant.numeric.integer.kantan"
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "match": "\\bimport\\b",
+                    "name": "keyword.import.kantan"
+                },
+                {
+                    "match": "\\bdef\\b",
+                    "name": "keyword.def.kantan"
+                },
+                {
+                    "match": "\\bextern\\b",
+                    "name": "keyword.extern.kantan"
+                },
+                {
+                    "match": "\\btype\\b",
+                    "name": "keyword.type.kantan"
+                },
+                {
+                    "match": "\\bstruct\\b",
+                    "name": "keyword.struct.kantan"
+                },
+                {
+                    "match": "\\blet\\b",
+                    "name": "keyword.let.kantan"
+                },
+                {
+                    "match": "\\bif\\b",
+                    "name": "keyword.if.kantan"
+                },
+                {
+                    "match": "\\belse\\b",
+                    "name": "keyword.else.kantan"
+                },
+                {
+                    "match": "\\bwhile\\b",
+                    "name": "keyword.while.kantan"
+                },
+                {
+                    "match": "\\bnew\\b",
+                    "name": "keyword.new.kantan"
+                },
+                {
+                    "match": "\\bdelete\\b",
+                    "name": "keyword.delete.kantan"
+                },
+                {
+                    "match": "\\breturn\\b",
+                    "name": "keyword.return.kantan"
+                },
+                {
+                    "match": "\\bas\\b",
+                    "name": "keyword.as.kantan"
+                },
+                {
+                    "match": "\\bsizeof\\b",
+                    "name": "keyword.sizeof.kantan"
+                },
+                {
+                    "match": "\\bfor\\b",
+                    "name": "keyword.for.kantan"
+                },
+                {
+                    "match": "\\bnull\\b",
+                    "name": "keyword.null.kantan"
+                },
+                {
+                    "match": "\\btrue\\b",
+                    "name": "keyword.true.kantan"
+                },
+                {
+                    "match": "\\bfalse\\b",
+                    "name": "keyword.false.kantan"
+                }
+            ]
+        }
+    }
+}
