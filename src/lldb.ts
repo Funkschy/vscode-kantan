@@ -1,20 +1,22 @@
-import { DebugSession, InitializedEvent, Thread, OutputEvent, BreakpointEvent, Breakpoint, Source, StoppedEvent, StackFrame } from 'vscode-debugadapter';
+import { DebugSession, InitializedEvent, Thread, OutputEvent, BreakpointEvent, Breakpoint, Source, StoppedEvent, StackFrame, ContinuedEvent } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import * as vscode from 'vscode';
 const { Subject } = require('await-notify');
 
 import { MiConnection, OutputHandler, MiBreakpoint } from './mi/connection';
-import { Output, StreamRecordType, Result, Value } from './mi/output';
+import { StreamRecordType, Result, Value, Tuple, StreamRecord, AsyncOutput, List } from './mi/output';
 
 interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
     target: string;
 }
 
 class BreakpointInfo {
+    id: number;
     vsBp: Breakpoint;
     miBp: MiBreakpoint;
 
-    constructor(vsBp: Breakpoint, miBp: MiBreakpoint) {
+    constructor(id: number, vsBp: Breakpoint, miBp: MiBreakpoint) {
+        this.id = id;
         this.vsBp = vsBp;
         this.miBp = miBp;
     }
@@ -26,7 +28,7 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
     private _configurationDone = new Subject();
 
     // full filepath -> line -> Breakpoint
-    private breakpoints: Map<string, Map<number, BreakpointInfo>> = new Map();
+    private breakpoints: Map<string, BreakpointInfo[]> = new Map();
 
     constructor() {
         super();
@@ -49,57 +51,35 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         this.setDebuggerColumnsStartAt1(true);
     }
 
-    handleParsed(output: Output) {
-        for (let streamRec of output.streamRecords) {
-            if (streamRec.type === StreamRecordType.Target) {
-                let output = streamRec.output.substr(1, streamRec.output.length - 2);
-                output = output.replace('\\n', '\n');
-                output = output.replace('\\r', '\r');
+    handleStreamRecrod(record: StreamRecord) {
+        if (record.type === StreamRecordType.Target) {
+            let output = record.output.substr(1, record.output.length - 2);
+            output = output.replace('\\n', '\n');
+            output = output.replace('\\r', '\r');
 
-                // TODO: emit outputevent
-                this.writeEmitter.fire(output);
+            // TODO: emit outputevent
+            this.writeEmitter.fire(output);
 
-                console.log(output);
-            }
+            console.log(output);
+        }
+    }
+
+
+        // remove ""
+    fromStr(str: string) { return str.substr(1, str.length - 2); }
+
+    handleAsyncOutput(output: AsyncOutput) {
+        let result = output.results.reduce((obj: any, item) => {
+            obj[item.variable] = item.value;
+            return obj;
+        }, {});
+
+        if (result.reason.content !== '"breakpoint-hit"') {
+            return;
         }
 
-        if (output.asyncOutputs.length > 0) {
-            for (let asyncOutput of output.asyncOutputs) {
-                let map = asyncOutput.results.reduce((obj: any, item) => {
-                    obj[item.variable] = item.value;
-                    return obj;
-                }, new Map<string, Value>());
-
-                if (map['reason'].content !== '"breakpoint-hit"') {
-                    break;
-                }
-
-                let frame = map['frame'];
-                let frameData = frame.content.reduce((obj: any, item: Result) => {
-                    obj[item.variable] = item.value;
-                    return obj;
-                }, new Map<string, Value>());
-
-                // remove ""
-                const fromStr = (str: string) => str.substr(1, str.length - 2);
-
-                let line = +fromStr(frameData['line'].content);
-                // let file = fromStr(frameData['file'].content);
-                let fullname = fromStr(frameData['fullname'].content);
-                let threadId = +fromStr(map['thread-id'].content);
-
-                let bp = this.breakpoints.get(fullname)?.get(line)?.vsBp;
-                if (bp) {
-                    bp.verified = true;
-                    this.sendEvent(new BreakpointEvent('changed', bp));
-                }
-
-                // this.emit('breakpointValidated', bp);
-                this.sendEvent(new StoppedEvent('breakpoint', threadId));
-            }
-        }
-
-        console.log(output);
+        let threadId = +this.fromStr(result['thread-id'].content);
+        this.sendEvent(new StoppedEvent('breakpoint', threadId));
     }
 
     handleRaw(output: string) {
@@ -110,7 +90,6 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         response.body = response.body || {};
 
 		response.body.supportsConfigurationDoneRequest = true;
-        response.body.supportsInstructionBreakpoints = true;
         response.body.supportsBreakpointLocationsRequest = true;
 
         this.sendResponse(response);
@@ -135,7 +114,7 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
 		this._configurationDone.notify();
 	}
 
-    setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments, request?: DebugProtocol.Request) {
+    async setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments, request?: DebugProtocol.Request) {
         let path = args.source.path;
         if (path === undefined) {
             path = '';
@@ -147,17 +126,20 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
 
         let src = new Source(name, path);
         let points: Breakpoint[] = [];
+        this.clearBreakpoints(path);
 
         for (let bp of request?.arguments.breakpoints) {
-            if (!this.breakpoints.get(path)) {
-                this.breakpoints.set(path, new Map());
-            }
             let vsBp = new Breakpoint(true, bp.line, undefined, src);
             let miBp = new MiBreakpoint(path, bp.line);
-            let info = new BreakpointInfo(vsBp, miBp);
-            this.breakpoints.get(path)?.set(bp.line, info);
             points.push(vsBp);
-            this.miConnection?.setBreakpoint(miBp);
+
+            let answer = await this.miConnection?.setBreakpoint(miBp);
+            let bkpt = answer?.result?.results[0].value.content as Tuple;
+            if (bkpt) {
+                let id = +this.fromStr(bkpt.fields.number.content);
+                let info = new BreakpointInfo(id, vsBp, miBp);
+                this.breakpoints.get(path)?.push(info);
+            }
 
             this.sendEvent(new BreakpointEvent('new', vsBp));
         }
@@ -168,47 +150,70 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         this.sendResponse(response);
     }
 
-    breakpointLocationsRequest(response: DebugProtocol.BreakpointLocationsResponse, args: DebugProtocol.BreakpointLocationsArguments, request?: DebugProtocol.Request) {
-        response.body = {
-            breakpoints: []
-        };
-
-        let path = args.source.path;
-        if (path) {
-            const bp = this.breakpoints.get(path)?.get(args.line)?.miBp;
-            if (bp) {
-                response.body = {
-                    breakpoints: [{
-                        line: bp.line,
-                        column: 5
-                    }]
-                };
+    clearBreakpoints(path: string) {
+        let bps = this.breakpoints.get(path);
+        if (bps) {
+            for (let old of bps) {
+                this.miConnection.removeBreakpoint(old.id);
+                this.sendEvent(new BreakpointEvent('removed', old.vsBp));
+                continue;
             }
         }
 
-        this.sendResponse(response);
+        this.breakpoints.set(path, []);
     }
 
-    setInstructionBreakpointsRequest(response: DebugProtocol.SetInstructionBreakpointsResponse, args: DebugProtocol.SetInstructionBreakpointsArguments, request?: DebugProtocol.Request) {
-        super.setInstructionBreakpointsRequest(response, args, request);
-        console.log('bruh 3');
-    }
-
-	stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments) {
-        this.miConnection.stackTrace();
-
-        let src = new Source('bintree.kan', '/home/felix/Documents/programming/kantan/compiler/test/files/bintree.kan');
+    breakpointLocationsRequest(response: DebugProtocol.BreakpointLocationsResponse, args: DebugProtocol.BreakpointLocationsArguments, request?: DebugProtocol.Request) {
+        // TODO: get col info
         response.body = {
-            stackFrames: [new StackFrame(0, 'main', src, 84)],
-            totalFrames: 1
+            breakpoints: [{
+                line: args.line,
+                column: undefined 
+            }]
         };
         this.sendResponse(response);
-        console.log('dont trace my stack');
     }
 
-    nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments, request?: DebugProtocol.Request) {
-        super.nextRequest(response, args, request);
-        console.log('next');
+	async stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments) {
+        let stack = await this.miConnection.stackTrace();
+
+        let frames: StackFrame[] = [];
+        let stackContent = stack.result?.results[0].value.content;
+        let numFrames = 0;
+        if (stackContent && stackContent instanceof List) {
+            numFrames = stackContent.elements.length;
+            for (let i = 0; i < numFrames; i++) {
+                let element = stackContent.elements[i];
+                if (!(element instanceof Result)) {
+                    continue;
+                }
+
+                let content = element.value.content;
+                if (!(content instanceof Tuple)) {
+                    continue;
+                }
+
+                let file = this.fromStr(content.fields.file.content);
+                let fullname = this.fromStr(content.fields.fullname.content);
+                let src = new Source(file, fullname);
+                let func = this.fromStr(content.fields.func.content);
+
+                let line = +this.fromStr(content.fields.line.content);
+                frames.push(new StackFrame(i, func, src, line));
+            }
+        }
+
+        response.body = {
+            stackFrames: frames,
+            totalFrames: numFrames
+        };
+        this.sendResponse(response);
+    }
+
+    async nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments, request?: DebugProtocol.Request) {
+        let data = await this.miConnection.next();
+        this.sendResponse(response);
+        this.sendEvent(new StoppedEvent('step', args.threadId));
     }	
 
     threadsRequest(response: DebugProtocol.ThreadsResponse) {
@@ -223,5 +228,10 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
 
     scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments, request?: DebugProtocol.Request) {
         console.log('scopes');
+    }
+
+    continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments, request?: DebugProtocol.Request) {
+        this.miConnection.continue();
+        this.sendEvent(new ContinuedEvent(args.threadId));
     }
 }

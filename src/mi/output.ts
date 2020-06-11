@@ -62,10 +62,12 @@ export enum StreamRecordType {
 
 export class ResultRecord {
     resultClass: ResultClass;
+    token: string | undefined;
     results: Result[];
 
-    constructor(resultClass: ResultClass, results: Result[]) {
+    constructor(resultClass: ResultClass, token: string | undefined, results: Result[]) {
         this.resultClass = resultClass;
+        this.token = token;
         this.results = results;
     }
 }
@@ -79,10 +81,29 @@ export enum ResultClass {
 }
 
 export class Value {
-    content: string | string[] | Result[] | Value[] | null;
+    content: string | Tuple | List;
 
-    constructor(content: string | string[] | Result[] | Value[] | null) {
+    constructor(content: string | Tuple | List) {
         this.content = content;
+    }
+}
+
+export class Tuple {
+    fields: any;
+    
+    constructor(results: Result[]) {
+        this.fields = results.reduce((obj: any, item) => {
+            obj[item.variable] = item.value;
+            return obj;
+        }, {});
+    }
+}
+
+export class List {
+    elements: Value[] | Result[];
+
+    constructor(elements: Value[] | Result[]) {
+        this.elements = elements;
     }
 }
 
@@ -229,6 +250,7 @@ export function fromOutput(consoleOutput: string): Output[] | null {
 
         parseOutput(): ResultRecord | StreamRecord | AsyncOutput | null {
             let next = this.lexer.next();
+            let last = next;
             while (next !== null) {
                 switch (next.type) {
                     // result record
@@ -248,7 +270,7 @@ export function fromOutput(consoleOutput: string): Output[] | null {
                             }
                         }
 
-                        return new ResultRecord(resultClass, results);
+                        return new ResultRecord(resultClass, last?.lexeme, results);
                     }
                     // target output
                     case TokenType.At: {
@@ -278,6 +300,7 @@ export function fromOutput(consoleOutput: string): Output[] | null {
                     }
                 }
 
+                last = next;
                 next = this.lexer.next();
             }
 
@@ -326,7 +349,7 @@ export function fromOutput(consoleOutput: string): Output[] | null {
                         if (results === null) {
                             return null;
                         }
-                        return new Value(results);
+                        return new Value(new List(results));
                     }
 
                     let values: Value[] = [];
@@ -342,7 +365,7 @@ export function fromOutput(consoleOutput: string): Output[] | null {
                     }
                     this.consume(TokenType.RBracket);
 
-                    return new Value(values);
+                    return new Value(new List(values));
                 }
                 case TokenType.LBrace: {
                     let results: Result[] = [];
@@ -353,7 +376,7 @@ export function fromOutput(consoleOutput: string): Output[] | null {
                     results = parsedResults;
                     this.consume(TokenType.RBrace);
 
-                    return new Value(results);
+                    return new Value(new Tuple(results));
                 }
                 default: return null;
             }

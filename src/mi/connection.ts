@@ -4,7 +4,8 @@ import * as output from './output';
 
 export interface OutputHandler {
     handleRaw(output: string): void
-    handleParsed(output: output.Output): void
+    handleStreamRecrod(record: output.StreamRecord): void;
+    handleAsyncOutput(output: output.AsyncOutput): void;
 }
 
 export class MiBreakpoint {
@@ -22,24 +23,38 @@ export class MiBreakpoint {
 }
 
 export class MiConnection {
-    process?: proc.ChildProcess;
-    started = false;
-    loaded = false;
-    breakpoints: MiBreakpoint[] = [];
+    private process?: proc.ChildProcess;
+    private loaded = false;
+    private pendingBreakpoints: MiBreakpoint[] = [];
+    private currentToken = 1;
+
+    private handlers: { [index: number]: (output: output.Output) => any } = {};
 
     connect(handler: OutputHandler) {
         let command = proc.spawn('lldb-mi');
         let buffer = '';
 
-        readline.createInterface({input: command.stdout, terminal: false}).on('line', line => {
+        readline.createInterface({ input: command.stdout, terminal: false }).on('line', line => {
             handler.handleRaw(line);
             buffer += line;
 
             if (buffer.endsWith('(gdb)')) {
                 let result = output.fromOutput(buffer);
+
                 if (result !== null) {
                     for (let single of result) {
-                        handler.handleParsed(single);
+                        for (let streamRec of single.streamRecords) {
+                            handler.handleStreamRecrod(streamRec);
+                        }
+
+                        for (let asyncOutput of single.asyncOutputs) {
+                            handler.handleAsyncOutput(asyncOutput);
+                        }
+
+                        let token = single.result?.token;
+                        if (token) {
+                            this.handlers[+token](single);
+                        }
                     }
                 }
                 buffer = '';
@@ -53,37 +68,60 @@ export class MiConnection {
         this.process?.stdin?.write(data + '\r\n');
     }
 
-    execute(command: string) {
-        this.sendRaw(command);
+    async execute(command: string): Promise<output.Output> {
+        let token = this.currentToken++;
+        return new Promise((resolve, reject) => {
+            this.handlers[token] = (output: output.Output) => {
+                resolve(output);
+            };
+            this.sendRaw(`${token}-${command}`);
+        });
     }
 
-    fetchFeatures() {
-        this.execute('-list-features');
+    async fetchFeatures(): Promise<output.Output> {
+        return this.execute('list-features');
     }
 
-    loadExecutable(executable: string) {
+    async loadExecutable(executable: string): Promise<output.Output> {
         this.loaded = true;
-        this.execute('-file-exec-and-symbols ' + executable);
+        let result = this.execute('file-exec-and-symbols ' + executable);
 
-        for (let bp of this.breakpoints) {
-            this.setBreakpoint(bp);
+        let len = this.pendingBreakpoints.length;
+        for (let i = 0; i < len; i++) {
+            let bp = this.pendingBreakpoints.pop();
+            if (bp) {
+                this.setBreakpoint(bp);
+            }
         }
+
+        return result;
     }
 
-    run() {
-        this.started = true;
-        this.execute('-exec-run');
+    async run(): Promise<output.Output> {
+        return this.execute('exec-run');
     }
 
-    setBreakpoint(bp: MiBreakpoint) {
+    async continue(): Promise<output.Output> {
+        return this.execute('exec-continue');
+    }
+
+    async next(): Promise<output.Output> {
+        return this.execute('exec-next');
+    }
+
+    async removeBreakpoint(id: number) {
+        return this.execute(`break-delete ${id}`);
+    }
+
+    async setBreakpoint(bp: MiBreakpoint) {
         if (!this.loaded) {
-            this.breakpoints.push(bp);
+            this.pendingBreakpoints.push(bp);
         } else {
-            this.execute(`-break-insert -f ${bp.toLocation()}`);
+            return this.execute(`break-insert -f ${bp.toLocation()}`);
         }
     }
 
-    stackTrace() {
-        this.execute('-stack-list-frames');
+    async stackTrace(): Promise<output.Output> {
+        return this.execute('stack-list-frames');
     }
 }
