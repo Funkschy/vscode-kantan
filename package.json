@@ -20,7 +20,7 @@
         "debuggers": [
             {
                 "type": "lldb-mi",
-                "program": "./out/src/lldb.js",
+                "program": "./out/debugAdapter.js",
                 "runtime": "node",
                 "label": "LLDB",
                 "configurationAttributes": {
@@ -65,9 +65,10 @@
         ]
     },
     "activationEvents": [
-        "onDebug", "onDebugDynamicConfigurations:lldb-mi"
+        "onDebug",
+        "onDebugDynamicConfigurations:lldb-mi"
     ],
-    "main": "./out/extension.js",
+    "main": "./out/extension",
     "scripts": {
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -p ./",
@@ -77,6 +78,7 @@
         "test": "node ./out/test/runTest.js"
     },
     "dependencies": {
+        "await-notify": "^1.0.1",
         "vscode-debugadapter": "1.41.0",
         "vscode-debugprotocol": "1.41.0"
     },

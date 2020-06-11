@@ -27,12 +27,22 @@ export enum MiFeature {
 
 // see https://sourceware.org/gdb/current/onlinedocs/gdb/GDB_002fMI-Output-Syntax.html#GDB_002fMI-Output-Syntax
 export class Output {
-    streamRecords: StreamRecord[];
-    result: ResultRecord | null;
+    asyncOutputs: AsyncOutput[] = [];
+    streamRecords: StreamRecord[] = [];
+    result: ResultRecord | null = null;
 
-    constructor(result: ResultRecord | null, streams: StreamRecord[]) {
-        this.result = result;
-        this.streamRecords = streams;
+    isNotEmpty(): boolean {
+        return this.result !== null || this.streamRecords.length > 0 || this.asyncOutputs.length > 0;
+    }
+}
+
+export class AsyncOutput {
+    // there is currently no other async-class, so an enum would be overkill
+    type: string = "stopped";
+    results: Result[];
+
+    constructor(results: Result[]) {
+        this.results = results;
     }
 }
 
@@ -68,7 +78,7 @@ export enum ResultClass {
     Exit = "exit"
 }
 
-class Value {
+export class Value {
     content: string | string[] | Result[] | Value[] | null;
 
     constructor(content: string | string[] | Result[] | Value[] | null) {
@@ -137,7 +147,7 @@ export function fromOutput(consoleOutput: string): Output[] | null {
         }
 
         lexIdent(): Token {
-            while (!this.atEnd() && (/^[a-z0-9]+$/i).test(this.current())) {
+            while (!this.atEnd() && (/^[a-z0-9-]+$/i).test(this.current())) {
                 this.advance();
             }
             return this.tokenFromStart(TokenType.Identifier);
@@ -217,7 +227,7 @@ export function fromOutput(consoleOutput: string): Output[] | null {
             this.lexer = new Lexer(output);
         }
 
-        parseOutput(): ResultRecord | StreamRecord | null {
+        parseOutput(): ResultRecord | StreamRecord | AsyncOutput | null {
             let next = this.lexer.next();
             while (next !== null) {
                 switch (next.type) {
@@ -247,6 +257,24 @@ export function fromOutput(consoleOutput: string): Output[] | null {
                             return null;
                         }
                         return new StreamRecord(StreamRecordType.Target, str.lexeme);
+                    }
+                    // exec-async-output
+                    case TokenType.Star: {
+                        let asyncClass = this.consume(TokenType.Identifier);
+                        if (asyncClass?.lexeme !== 'stopped') {
+                            break;
+                        }
+
+                        let results: Result[] = [];
+                        if (this.lexer.peek()?.type === TokenType.Comma) {
+                            this.consume(TokenType.Comma);
+                            let parsedResults = this.parseResults();
+                            if (parsedResults !== null) {
+                                results = parsedResults;
+                            }
+                        }
+
+                        return new AsyncOutput(results);
                     }
                 }
 
@@ -317,20 +345,15 @@ export function fromOutput(consoleOutput: string): Output[] | null {
                     return new Value(values);
                 }
                 case TokenType.LBrace: {
-                    let values: Value[] = [];
-                    while (this.lexer.peek()?.type !== TokenType.RBrace) {
-                        let value = this.parseValue();
-                        if (value === null) {
-                            return null;
-                        }
-                        values.push(value);
-                        if (this.lexer.peek()?.type === TokenType.Comma) {
-                            this.consume(TokenType.Comma);
-                        }
+                    let results: Result[] = [];
+                    let parsedResults = this.parseResults();
+                    if (parsedResults === null) {
+                        return null;
                     }
+                    results = parsedResults;
                     this.consume(TokenType.RBrace);
 
-                    return new Value(values);
+                    return new Value(results);
                 }
                 default: return null;
             }
@@ -348,22 +371,24 @@ export function fromOutput(consoleOutput: string): Output[] | null {
     let parser = new Parser(consoleOutput);
     let results: Output[] = [];
 
-    let output = new Output(null, []);
+    let output = new Output();
     while (!parser.lexer.atEnd()) {
         let record = parser.parseOutput();
 
         if (record instanceof StreamRecord) {
             output.streamRecords.push(record);
+        } else if (record instanceof AsyncOutput) {
+            output.asyncOutputs.push(record);
         } else if (record instanceof ResultRecord) {
             if (output.result !== null) {
                 results.push(output);
-                output = new Output(null, []);
+                output = new Output();
             }
             output.result = record;
         }
     }
 
-    if (output.result !== null || output.streamRecords.length > 0) {
+    if (output.isNotEmpty()) {
         if (
             results.length === 0
             || (results.length > 0 && results[results.length - 1] !== output)
