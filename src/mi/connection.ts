@@ -125,6 +125,14 @@ export class MiConnection {
         return this.executeMi('exec-next');
     }
 
+    async step(): Promise<output.Output> {
+        return this.executeMi('exec-step');
+    }
+
+    async finish(): Promise<output.Output> {
+        return this.executeMi('exec-finish');
+    }
+
     async removeBreakpoint(id: number): Promise<output.Output> {
         return this.executeMi(`break-delete ${id}`);
     }
@@ -139,6 +147,10 @@ export class MiConnection {
 
     async stackTrace(): Promise<output.Output> {
         return this.executeMi('stack-list-frames');
+    }
+
+    async listArgs(): Promise<output.Output> {
+        return this.executeMi('stack-list-arguments 0 0 0');
     }
 
     async listLocals(): Promise<output.Output> {
@@ -157,8 +169,8 @@ export class MiConnection {
         return this.executeMi(`var-list-children ${name}`);
     }
 
-    async varUpdate(name: string): Promise<output.Output> {
-        return this.executeMi(`var-update ${name}`);
+    async varDelete(name: string): Promise<output.Output> {
+        return this.executeMi(`var-delete ${name}`);
     }
 
     // -var-create t * t

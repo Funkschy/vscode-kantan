@@ -4,8 +4,7 @@ import * as vscode from 'vscode';
 const { Subject } = require('await-notify');
 
 import { MiConnection, OutputHandler, MiBreakpoint } from './mi/connection';
-import { StreamRecordType, Result, Value, Tuple, StreamRecord, AsyncOutput, List, ResultClass } from './mi/output';
-import { stringify } from 'querystring';
+import { Output, StreamRecordType, Result, Value, Tuple, StreamRecord, AsyncOutput, List, ResultClass } from './mi/output';
 
 interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
     program: string;
@@ -221,6 +220,18 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         this.sendEvent(new StoppedEvent('step', args.threadId));
     }
 
+    async stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments, request?: DebugProtocol.Request) {
+        await this.miConnection.step();
+        this.sendResponse(response);
+        this.sendEvent(new StoppedEvent('step', args.threadId));
+    }
+
+    async stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments, request?: DebugProtocol.Request) {
+        await this.miConnection.finish();
+        this.sendResponse(response);
+        this.sendEvent(new StoppedEvent('step', args.threadId));
+    }
+
     threadsRequest(response: DebugProtocol.ThreadsResponse) {
         // runtime supports no threads so just return a default thread.
         response.body = {
@@ -232,7 +243,6 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
     }
 
     scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments, request?: DebugProtocol.Request) {
-        console.log('scopes', args.frameId);
         response.body = {
             scopes: [new Scope('Locals', STACK_HANDLES_START + args.frameId, false)]
         };
@@ -253,8 +263,29 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         return `"${result[1]}"`;
     }
 
+    async getFuncArgs(): Promise<Value[]> {
+        let funcArgs = await this.miConnection.listArgs();
+        if (!funcArgs.isDone()) {
+            return [];
+        }
+        let frames = (funcArgs.result?.results[0].value.content as List).elements as Result[];
+        let args = (frames[0].value.content as Tuple).fields.args.content.elements as Result[];
+
+        let outs: Promise<Output>[] = args.map(async arg => {
+            let name = this.fromStr(arg.value.content as string);
+            return this.miConnection.varCreate(name);
+        });
+
+        let outputs: Value[] = [];
+        for (let out of outs) {
+            let tuple = new Tuple((await out).result?.results as Result[]);
+            outputs.push(new Value(tuple));
+        }
+
+        return outputs;
+    }
+
     async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request) {
-        let vars = await this.miConnection.listLocals();
         let isForComplexType = args.variablesReference >= VAR_HANDLES_START;
 
         if (isForComplexType) {
@@ -320,11 +351,15 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
             return;
         }
 
+        let funcArgs = this.getFuncArgs();
+        let vars = await this.miConnection.listLocals();
         let localsByName = new Map<string, Variable>();
-        let locals: Variable[] = [];
 
-        if (vars.result?.resultClass === ResultClass.Done) {
+        if (vars.isDone()) {
             let values = (vars.result?.results[0].value.content as List).elements as Value[];
+            let args = await funcArgs;
+            values = values.concat(args);
+
             for (let value of values) {
                 let tuple = value.content as Tuple;
 
@@ -346,28 +381,28 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
                         varValue = this.parseMiStringLiteral(ptrValue);
                     } else {
                         varValue = ptrValue;
-                        await this.miConnection.varCreate(varName);;
                         varRef = this.varHandles.create(varName);
                     }
-                } else if (tuple.fields.value) {
-                    await this.miConnection.varCreate(varName);
-
+                } else if (tuple.fields.value && tuple.fields.value.content !== '"{...}"') {
                     // simple type
                     varValue = this.fromStr(tuple.fields.value.content);
                 } else {
-                    // for complex types, we need a var object
-                    await this.miConnection.varCreate(varName);
                     varRef = this.varHandles.create(varName);
                 }
 
+                if (localsByName.get(varName)) {
+                    await this.miConnection.varDelete(varName);
+                }
+
+                await this.miConnection.varCreate(varName);
                 let v = new Variable(varName, varValue, varRef);
-                locals.push(v);
+
                 localsByName.set(varName, v);
             }
         }
 
         response.body = {
-            variables: locals
+            variables: Array.from(localsByName.values())
         };
         this.sendResponse(response);
     }

@@ -31,6 +31,10 @@ export class Output {
     streamRecords: StreamRecord[] = [];
     result: ResultRecord | null = null;
 
+    isDone(): boolean {
+        return this.result?.resultClass === ResultClass.Done;
+    }
+
     isNotEmpty(): boolean {
         return this.result !== null || this.streamRecords.length > 0 || this.asyncOutputs.length > 0;
     }
