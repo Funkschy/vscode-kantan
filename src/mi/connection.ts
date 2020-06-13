@@ -4,7 +4,7 @@ import * as output from './output';
 
 export interface OutputHandler {
     handleRaw(output: string): void
-    handleStreamRecrod(record: output.StreamRecord): void;
+    handleStreamRecord(record: output.StreamRecord): void;
     handleAsyncOutput(output: output.AsyncOutput): void;
 }
 
@@ -30,8 +30,8 @@ export class MiConnection {
 
     private handlers: { [index: number]: (output: output.Output) => any } = {};
 
-    connect(handler: OutputHandler) {
-        let command = proc.spawn('lldb-mi');
+    async connect(handler: OutputHandler, cwd: string) {
+        let command = proc.spawn('lldb-mi', [], {cwd: cwd, env: process.env});
         let buffer = '';
 
         readline.createInterface({ input: command.stdout, terminal: false }).on('line', line => {
@@ -42,49 +42,62 @@ export class MiConnection {
                 let result = output.fromOutput(buffer);
 
                 if (result !== null) {
-                    for (let single of result) {
-                        for (let streamRec of single.streamRecords) {
-                            handler.handleStreamRecrod(streamRec);
-                        }
-
-                        for (let asyncOutput of single.asyncOutputs) {
-                            handler.handleAsyncOutput(asyncOutput);
-                        }
-
-                        let token = single.result?.token;
-                        if (token) {
-                            this.handlers[+token](single);
-                        }
-                    }
+                    this.dispatchOutput(handler, result);
                 }
                 buffer = '';
             }
         });
 
         this.process = command;
+        await this.executeMi(`environment-cd ${cwd}`);
+    }
+
+    dispatchOutput(handler: OutputHandler, result: output.Output[]) {
+        for (let single of result) {
+            for (let streamRec of single.streamRecords) {
+                handler.handleStreamRecord(streamRec);
+            }
+
+            for (let asyncOutput of single.asyncOutputs) {
+                handler.handleAsyncOutput(asyncOutput);
+            }
+
+            let token = single.result?.token;
+            if (token) {
+                this.handlers[+token](single);
+            }
+        }
     }
 
     sendRaw(data: string) {
         this.process?.stdin?.write(data + '\r\n');
     }
 
-    async execute(command: string): Promise<output.Output> {
+    async execute(command: string, sep: string): Promise<output.Output> {
         let token = this.currentToken++;
         return new Promise((resolve, reject) => {
             this.handlers[token] = (output: output.Output) => {
                 resolve(output);
             };
-            this.sendRaw(`${token}-${command}`);
+            this.sendRaw(`${token}${sep}${command}`);
         });
     }
 
+    async executeMi(command: string): Promise<output.Output> {
+        return this.execute(command, '-');
+    }
+
+    async executeCli(command: string): Promise<output.Output> {
+        return this.execute(command, ' ');
+    }
+
     async fetchFeatures(): Promise<output.Output> {
-        return this.execute('list-features');
+        return this.executeMi('list-features');
     }
 
     async loadExecutable(executable: string): Promise<output.Output> {
         this.loaded = true;
-        let result = this.execute('file-exec-and-symbols ' + executable);
+        let result = this.executeMi('file-exec-and-symbols ' + executable);
 
         let len = this.pendingBreakpoints.length;
         for (let i = 0; i < len; i++) {
@@ -97,31 +110,67 @@ export class MiConnection {
         return result;
     }
 
-    async run(): Promise<output.Output> {
-        return this.execute('exec-run');
+    async run(args: string[]): Promise<output.Output> {
+        if (args.length > 0) {
+            await this.executeMi(`exec-arguments ${args.join(', ')}`);
+        }
+        return this.executeCli('run');
     }
 
     async continue(): Promise<output.Output> {
-        return this.execute('exec-continue');
+        return this.executeMi('exec-continue');
     }
 
     async next(): Promise<output.Output> {
-        return this.execute('exec-next');
+        return this.executeMi('exec-next');
     }
 
-    async removeBreakpoint(id: number) {
-        return this.execute(`break-delete ${id}`);
+    async removeBreakpoint(id: number): Promise<output.Output> {
+        return this.executeMi(`break-delete ${id}`);
     }
 
     async setBreakpoint(bp: MiBreakpoint) {
         if (!this.loaded) {
             this.pendingBreakpoints.push(bp);
         } else {
-            return this.execute(`break-insert -f ${bp.toLocation()}`);
+            return this.executeMi(`break-insert -f ${bp.toLocation()}`);
         }
     }
 
     async stackTrace(): Promise<output.Output> {
-        return this.execute('stack-list-frames');
+        return this.executeMi('stack-list-frames');
+    }
+
+    async listLocals(): Promise<output.Output> {
+        return this.executeMi('stack-list-locals 2');
+    }
+
+    async varCreate(name: string, expr?: string): Promise<output.Output> {
+        if (!expr) {
+            expr = name;
+        }
+
+        return this.executeMi(`var-create ${name} * ${expr}`);
+    }
+
+    async listChildren(name: string): Promise<output.Output> {
+        return this.executeMi(`var-list-children ${name}`);
+    }
+
+    async varUpdate(name: string): Promise<output.Output> {
+        return this.executeMi(`var-update ${name}`);
+    }
+
+    // -var-create t * t
+    // ^done,name="t",numchild="2",value="{...}",type="bintree.Test",thread-id="1",has_more="0"
+    // (gdb)
+    // -var-evaluate-expression t
+    // ^done,value="{...}"
+    // (gdb)
+    // -var-list-children t
+    // ^done,numchild="2",children=[child={name="t.i",exp="i",numchild="0",type="int",thread-id="1",has_more="0"},child={name="t.p",exp="p",numchild="2",type="bintree.Person",thread-id="1",has_more="0"}],has_more="0"
+    // (gdb)
+    async evaluate(expr: string): Promise<output.Output> {
+        return this.executeMi(`var-evaluate-expression ${expr}`);
     }
 }

@@ -160,7 +160,9 @@ export function fromOutput(consoleOutput: string): Output[] | null {
         }
 
         lexString(): Token {
-            while (!this.atEnd() && this.current() !== '"') {
+            let last = this.current();
+            while (!this.atEnd() && !(this.current() === '"' && last !== '\\')) {
+                last = this.current();
                 this.advance();
             }
             this.advance();
@@ -168,7 +170,7 @@ export function fromOutput(consoleOutput: string): Output[] | null {
         }
 
         lexIdent(): Token {
-            while (!this.atEnd() && (/^[a-z0-9-]+$/i).test(this.current())) {
+            while (!this.atEnd() && (/^[a-z0-9-_]+$/i).test(this.current())) {
                 this.advance();
             }
             return this.tokenFromStart(TokenType.Identifier);

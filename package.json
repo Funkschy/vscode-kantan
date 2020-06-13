@@ -29,9 +29,13 @@
                             "program"
                         ],
                         "properties": {
-                            "target": {
+                            "program": {
                                 "type": "string",
                                 "description": "Path to the Executable"
+                            },
+                            "args": {
+                                "type": "array",
+                                "description": "Program arguments"
                             },
                             "cwd": {
                                 "type": "string",

@@ -25,12 +25,13 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 				config.type = 'lldb-mi';
 				config.name = 'Launch';
 				config.request = 'launch';
-				config.target = '${config.cwd}/a.out';
+				config.program = '${config.cwd}/a.out';
+				config.args = [];
 				config.stopOnEntry = true;
 			}
 		}
 
-		if (!config.target) {
+		if (!config.program) {
 			return vscode.window.showInformationMessage("Cannot find a program to debug").then(_ => {
 				return undefined;	// abort launch
 			});

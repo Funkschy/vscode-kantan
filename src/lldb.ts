@@ -1,14 +1,20 @@
-import { DebugSession, InitializedEvent, Thread, OutputEvent, BreakpointEvent, Breakpoint, Source, StoppedEvent, StackFrame, ContinuedEvent } from 'vscode-debugadapter';
+import { DebugSession, InitializedEvent, Thread, Handles, OutputEvent, BreakpointEvent, Breakpoint, Source, StoppedEvent, StackFrame, ContinuedEvent, Scope, Variable } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import * as vscode from 'vscode';
 const { Subject } = require('await-notify');
 
 import { MiConnection, OutputHandler, MiBreakpoint } from './mi/connection';
-import { StreamRecordType, Result, Value, Tuple, StreamRecord, AsyncOutput, List } from './mi/output';
+import { StreamRecordType, Result, Value, Tuple, StreamRecord, AsyncOutput, List, ResultClass } from './mi/output';
+import { stringify } from 'querystring';
 
 interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
-    target: string;
+    program: string;
+    cwd: string;
+    args: string[];
 }
+
+const STACK_HANDLES_START = 1;
+const VAR_HANDLES_START = 1024;
 
 class BreakpointInfo {
     id: number;
@@ -29,12 +35,13 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
 
     // full filepath -> line -> Breakpoint
     private breakpoints: Map<string, BreakpointInfo[]> = new Map();
+    private varHandles = new Handles<string>(VAR_HANDLES_START);
 
     constructor() {
         super();
 
-		this.setDebuggerLinesStartAt1(true);
-		this.setDebuggerColumnsStartAt1(true);
+        this.setDebuggerLinesStartAt1(true);
+        this.setDebuggerColumnsStartAt1(true);
 
         this.miConnection = new MiConnection();
 
@@ -51,7 +58,7 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         this.setDebuggerColumnsStartAt1(true);
     }
 
-    handleStreamRecrod(record: StreamRecord) {
+    handleStreamRecord(record: StreamRecord) {
         if (record.type === StreamRecordType.Target) {
             let output = record.output.substr(1, record.output.length - 2);
             output = output.replace('\\n', '\n');
@@ -65,7 +72,7 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
     }
 
 
-        // remove ""
+    // remove ""
     fromStr(str: string) { return str.substr(1, str.length - 2); }
 
     handleAsyncOutput(output: AsyncOutput) {
@@ -89,7 +96,7 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
     initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments) {
         response.body = response.body || {};
 
-		response.body.supportsConfigurationDoneRequest = true;
+        response.body.supportsConfigurationDoneRequest = true;
         response.body.supportsBreakpointLocationsRequest = true;
 
         this.sendResponse(response);
@@ -97,22 +104,22 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
     }
 
     async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments, request?: DebugProtocol.Request) {
-		// wait until configuration has finished (and configurationDoneRequest has been called)
-		await this._configurationDone.wait(1000);
+        // wait until configuration has finished (and configurationDoneRequest has been called)
+        await this._configurationDone.wait(1000);
 
-        this.miConnection.connect(this);
+        await this.miConnection.connect(this, args.cwd);
         this.miConnection.fetchFeatures();
-        this.miConnection.loadExecutable(args.target);
-        this.miConnection.run();
+        await this.miConnection.loadExecutable(args.program);
+        await this.miConnection.run(args.args);
         this.sendResponse(response);
     }
 
     configurationDoneRequest(response: DebugProtocol.ConfigurationDoneResponse, args: DebugProtocol.ConfigurationDoneArguments) {
-		super.configurationDoneRequest(response, args);
+        super.configurationDoneRequest(response, args);
 
-		// notify the launchRequest that configuration has finished
-		this._configurationDone.notify();
-	}
+        // notify the launchRequest that configuration has finished
+        this._configurationDone.notify();
+    }
 
     async setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments, request?: DebugProtocol.Request) {
         let path = args.source.path;
@@ -145,19 +152,17 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         }
 
         response.body = {
-            breakpoints: points 
+            breakpoints: points
         };
         this.sendResponse(response);
     }
 
     clearBreakpoints(path: string) {
-        let bps = this.breakpoints.get(path);
-        if (bps) {
-            for (let old of bps) {
-                this.miConnection.removeBreakpoint(old.id);
-                this.sendEvent(new BreakpointEvent('removed', old.vsBp));
-                continue;
-            }
+        let bps = this.breakpoints.get(path) || [];
+        for (let old of bps) {
+            this.miConnection.removeBreakpoint(old.id);
+            this.sendEvent(new BreakpointEvent('removed', old.vsBp));
+            continue;
         }
 
         this.breakpoints.set(path, []);
@@ -168,13 +173,13 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         response.body = {
             breakpoints: [{
                 line: args.line,
-                column: undefined 
+                column: undefined
             }]
         };
         this.sendResponse(response);
     }
 
-	async stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments) {
+    async stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments) {
         let stack = await this.miConnection.stackTrace();
 
         let frames: StackFrame[] = [];
@@ -211,27 +216,159 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
     }
 
     async nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments, request?: DebugProtocol.Request) {
-        let data = await this.miConnection.next();
+        await this.miConnection.next();
         this.sendResponse(response);
         this.sendEvent(new StoppedEvent('step', args.threadId));
-    }	
+    }
 
     threadsRequest(response: DebugProtocol.ThreadsResponse) {
-		// runtime supports no threads so just return a default thread.
-		response.body = {
-			threads: [
-				new Thread(1, "thread 1")
-			]
-		};
-		this.sendResponse(response);
+        // runtime supports no threads so just return a default thread.
+        response.body = {
+            threads: [
+                new Thread(1, "thread 1")
+            ]
+        };
+        this.sendResponse(response);
     }
 
     scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments, request?: DebugProtocol.Request) {
-        console.log('scopes');
+        console.log('scopes', args.frameId);
+        response.body = {
+            scopes: [new Scope('Locals', STACK_HANDLES_START + args.frameId, false)]
+        };
+        this.sendResponse(response);
     }
 
     continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments, request?: DebugProtocol.Request) {
         this.miConnection.continue();
         this.sendEvent(new ContinuedEvent(args.threadId));
+        this.sendResponse(response);
+    }
+
+    parseMiStringLiteral(value: string): string {
+        let result = value.match(/0x[\da-fA-F]+ \\\"(.*)\\\"/);
+        if (!result) {
+            return '';
+        }
+        return `"${result[1]}"`;
+    }
+
+    async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request) {
+        let vars = await this.miConnection.listLocals();
+        let isForComplexType = args.variablesReference >= VAR_HANDLES_START;
+
+        if (isForComplexType) {
+            let fields: Variable[] = [];
+            let varName = this.varHandles.get(args.variablesReference);
+            let childrenResults = (await this.miConnection.listChildren(varName)).result?.results;
+            // TODO: error if resultClass != done
+
+            for (let elem of childrenResults!) {
+                if (elem.variable !== 'children') {
+                    continue;
+                }
+
+                let children = elem.value.content as List;
+                for (let child of children.elements as Result[]) {
+                    let childTuple = child.value.content as Tuple;
+                    let childName = this.fromStr(childTuple.fields.exp.content);
+                    let numChildren = +this.fromStr(childTuple.fields.numchild.content);
+                    let varType = this.fromStr(childTuple.fields.type.content);
+
+                    let isPointer = varType.endsWith('*');
+                    let isString = varType === 'char *';
+
+                    let expr = this.fromStr(childTuple.fields.name.content);
+                    let result = await this.miConnection.evaluate(expr);
+
+                    let varRef = 0;
+                    let value = '';
+
+                    if (result.result?.resultClass !== ResultClass.Done) {
+                        console.log(result);
+                        continue;
+                    }
+
+                    let content = result.result?.results[0].value.content;
+                    let contentValue = '';
+                    if (typeof (content) === 'string') {
+                        contentValue = this.fromStr(content);
+                    }
+
+                    let isNull = isPointer && +contentValue === 0;
+
+                    if (isNull) {
+                        value = 'null';
+                    } else if (numChildren <= 0 || isString) {
+                        if (isString) {
+                            value = this.parseMiStringLiteral(contentValue);
+                        } else {
+                            value = contentValue;
+                        }
+                    } else {
+                        varRef = this.varHandles.create(expr);
+                    }
+
+                    fields.push(new Variable(childName, value, varRef));
+                }
+            }
+
+            response.body = {
+                variables: fields
+            };
+            this.sendResponse(response);
+            return;
+        }
+
+        let localsByName = new Map<string, Variable>();
+        let locals: Variable[] = [];
+
+        if (vars.result?.resultClass === ResultClass.Done) {
+            let values = (vars.result?.results[0].value.content as List).elements as Value[];
+            for (let value of values) {
+                let tuple = value.content as Tuple;
+
+                let varName = this.fromStr(tuple.fields.name.content);
+                let varType = this.fromStr(tuple.fields.type.content);
+                let isPointer = varType.endsWith('*');
+                let isString = varType === 'char *';
+
+                let varRef = 0;
+                let varValue = '';
+
+                if (isPointer) {
+                    let ptrValue = this.fromStr(tuple.fields.value.content);
+                    let isNull = isPointer && +ptrValue === 0;
+
+                    if (isNull) {
+                        varValue = 'null';
+                    } else if (isString) {
+                        varValue = this.parseMiStringLiteral(ptrValue);
+                    } else {
+                        varValue = ptrValue;
+                        await this.miConnection.varCreate(varName);;
+                        varRef = this.varHandles.create(varName);
+                    }
+                } else if (tuple.fields.value) {
+                    await this.miConnection.varCreate(varName);
+
+                    // simple type
+                    varValue = this.fromStr(tuple.fields.value.content);
+                } else {
+                    // for complex types, we need a var object
+                    await this.miConnection.varCreate(varName);
+                    varRef = this.varHandles.create(varName);
+                }
+
+                let v = new Variable(varName, varValue, varRef);
+                locals.push(v);
+                localsByName.set(varName, v);
+            }
+        }
+
+        response.body = {
+            variables: locals
+        };
+        this.sendResponse(response);
     }
 }
