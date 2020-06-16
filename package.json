@@ -19,19 +19,31 @@
         ],
         "debuggers": [
             {
-                "type": "lldb-mi",
+                "type": "kantan",
                 "program": "./out/debugAdapter.js",
                 "runtime": "node",
                 "label": "LLDB",
                 "configurationAttributes": {
                     "launch": {
-                        "requires": [
-                            "program"
-                        ],
+                        "requires": [],
                         "properties": {
+                            "compile": {
+                                "type": "boolean",
+                                "description": "Compile the Kantan source code"
+                            },
                             "program": {
                                 "type": "string",
                                 "description": "Path to the Executable"
+                            },
+                            "kantanPath": {
+                                "type": "string",
+                                "description": "Path to the Kantan Executable",
+                                "default": "kantan"
+                            },
+                            "kantanFiles": {
+                                "type": "array",
+                                "description": "Source files to compile",
+                                "default": "${workspaceFolder}/*.kan"
                             },
                             "args": {
                                 "type": "array",
@@ -40,11 +52,40 @@
                             "cwd": {
                                 "type": "string",
                                 "description": "Current working directory",
-                                "default": "${workspaceFolder}/"
+                                "default": "${workspaceFolder}"
                             }
                         }
                     }
-                }
+                },
+                "configurationSnippets": [
+                    {
+                        "label": "Kantan: Compile & Launch",
+                        "body": {
+                            "type": "kantan",
+                            "request": "launch",
+                            "compile": true,
+                            "kantanPath": "kantan",
+                            "kantanFiles": [
+                                "main.kan"
+                            ],
+                            "name": "Compile & Launch",
+                            "args": [],
+                            "cwd": "^\"\\${workspaceFolder}\""
+                        }
+                    },
+                    {
+                        "label": "Kantan LLDB",
+                        "body": {
+                            "type": "kantan",
+                            "request": "launch",
+                            "compile": false,
+                            "name": "lldb-mi",
+                            "program": "^\"\\${workspaceFolder}/a.out\"",
+                            "args": [],
+                            "cwd": "^\"\\${workspaceFolder}\""
+                        }
+                    }
+                ]
             }
         ],
         "languages": [
