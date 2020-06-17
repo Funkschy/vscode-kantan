@@ -2,6 +2,7 @@
     "name": "vscode-kantan",
     "publisher": "Funkschy",
     "displayName": "vscode-kantan",
+    "repository": "https://github.com/Funkschy/vscode-kantan",
     "description": "Support for the Kantan programming language",
     "version": "0.0.1",
     "engines": {
