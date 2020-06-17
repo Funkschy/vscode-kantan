@@ -1,6 +1,7 @@
 import * as proc from 'child_process';
 import * as readline from 'readline';
 import * as output from './output';
+import * as r from './mapping';
 
 export interface OutputHandler {
     handleRaw(output: string): void
@@ -134,27 +135,34 @@ export class MiConnection {
     }
 
     async removeBreakpoint(id: number): Promise<output.Output> {
+        await this.executeMi(`break-disable ${id}`);
         return this.executeMi(`break-delete ${id}`);
     }
 
-    async setBreakpoint(bp: MiBreakpoint) {
+    async setBreakpoint(bp: MiBreakpoint): Promise<r.MappingError | r.BreakpointResult | number> {
         if (!this.loaded) {
             this.pendingBreakpoints.push(bp);
+            return this.pendingBreakpoints.length;
         } else {
-            return this.executeMi(`break-insert -f ${bp.toLocation()}`);
+            return this.executeMi(`break-insert -f ${bp.toLocation()}`).then( out =>
+                r.BreakpointResult.fromOutput(out)
+            );
         }
     }
 
-    async stackTrace(): Promise<output.Output> {
-        return this.executeMi('stack-list-frames');
+    async stackTrace(): Promise<r.StacktraceResult | r.MappingError> {
+        return this.executeMi('stack-list-frames')
+            .then(out => r.StacktraceResult.fromOutput(out));
     }
 
-    async listArgs(): Promise<output.Output> {
-        return this.executeMi('stack-list-arguments 0 0 0');
+    async listArgs(): Promise<r.FuncArgsResult | r.MappingError> {
+        return this.executeMi('stack-list-arguments 0 0 0')
+            .then(out => r.FuncArgsResult.fromOutput(out));
     }
 
-    async listLocals(): Promise<output.Output> {
-        return this.executeMi('stack-list-locals 2');
+    async listLocals(): Promise<r.LocalsResult | r.MappingError> {
+        return this.executeMi('stack-list-locals 2')
+            .then(out => r.LocalsResult.fromOutput(out));
     }
 
     async varCreate(name: string, expr?: string): Promise<output.Output> {
@@ -165,8 +173,9 @@ export class MiConnection {
         return this.executeMi(`var-create ${name} * ${expr}`);
     }
 
-    async listChildren(name: string): Promise<output.Output> {
-        return this.executeMi(`var-list-children ${name}`);
+    async listChildren(name: string): Promise<r.ListChildrenResult | r.MappingError> {
+        return this.executeMi(`var-list-children ${name}`)
+            .then(out => r.ListChildrenResult.fromOutput(out));
     }
 
     async varDelete(name: string): Promise<output.Output> {

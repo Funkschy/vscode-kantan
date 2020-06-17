@@ -5,6 +5,7 @@ const { Subject } = require('await-notify');
 
 import { MiConnection, OutputHandler, MiBreakpoint } from './mi/connection';
 import { Output, StreamRecordType, Result, Value, Tuple, StreamRecord, AsyncOutput, List, ResultClass } from './mi/output';
+import { BreakpointResult, MappingError, StacktraceResult, VarInfo } from './mi/mapping';
 
 interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
     program: string;
@@ -130,23 +131,25 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
             name = '';
         }
 
-        let src = new Source(name, path);
-        let points: Breakpoint[] = [];
-        this.clearBreakpoints(path);
+        const src = new Source(name, path);
+        const points: Breakpoint[] = [];
+        await this.clearBreakpoints(path);
 
         for (let bp of request?.arguments.breakpoints) {
-            let vsBp = new Breakpoint(true, bp.line, undefined, src);
-            let miBp = new MiBreakpoint(path, bp.line);
+            const vsBp = new Breakpoint(true, bp.line, undefined, src);
+            const miBp = new MiBreakpoint(path, bp.line);
             points.push(vsBp);
 
-            let answer = await this.miConnection?.setBreakpoint(miBp);
-            let bkpt = answer?.result?.results[0].value.content as Tuple;
-            if (bkpt) {
-                let id = +this.fromStr(bkpt.fields.number.content);
-                let info = new BreakpointInfo(id, vsBp, miBp);
-                this.breakpoints.get(path)?.push(info);
+            const bkpt = await this.miConnection?.setBreakpoint(miBp);
+            let id = -1;
+            if (bkpt instanceof BreakpointResult) {
+                id = bkpt.id;
+            } else if (typeof bkpt === 'number') {
+                id = bkpt;
             }
 
+            let info = new BreakpointInfo(id, vsBp, miBp);
+            this.breakpoints.get(path)?.push(info);
             this.sendEvent(new BreakpointEvent('new', vsBp));
         }
 
@@ -156,10 +159,10 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         this.sendResponse(response);
     }
 
-    clearBreakpoints(path: string) {
+    async clearBreakpoints(path: string) {
         let bps = this.breakpoints.get(path) || [];
         for (let old of bps) {
-            this.miConnection.removeBreakpoint(old.id);
+            await this.miConnection.removeBreakpoint(old.id);
             this.sendEvent(new BreakpointEvent('removed', old.vsBp));
             continue;
         }
@@ -180,36 +183,20 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
 
     async stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments) {
         let stack = await this.miConnection.stackTrace();
+        if (stack instanceof MappingError) {
+            vscode.window.showInformationMessage(stack.message);
+            return;
+        }
 
         let frames: StackFrame[] = [];
-        let stackContent = stack.result?.results[0].value.content;
-        let numFrames = 0;
-        if (stackContent && stackContent instanceof List) {
-            numFrames = stackContent.elements.length;
-            for (let i = 0; i < numFrames; i++) {
-                let element = stackContent.elements[i];
-                if (!(element instanceof Result)) {
-                    continue;
-                }
-
-                let content = element.value.content;
-                if (!(content instanceof Tuple)) {
-                    continue;
-                }
-
-                let file = this.fromStr(content.fields.file.content);
-                let fullname = this.fromStr(content.fields.fullname.content);
-                let src = new Source(file, fullname);
-                let func = this.fromStr(content.fields.func.content);
-
-                let line = +this.fromStr(content.fields.line.content);
-                frames.push(new StackFrame(i, func, src, line));
-            }
+        for (let i = 0; i < stack.frames.length; i++) {
+            const frame = stack.frames[i];
+            frames.push(new StackFrame(i, frame.func, frame.source, frame.line));
         }
 
         response.body = {
             stackFrames: frames,
-            totalFrames: numFrames
+            totalFrames: frames.length
         };
         this.sendResponse(response);
     }
@@ -263,85 +250,61 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
         return `"${result[1]}"`;
     }
 
-    async getFuncArgs(): Promise<Value[]> {
-        let funcArgs = await this.miConnection.listArgs();
-        if (!funcArgs.isDone()) {
-            return [];
-        }
-        let frames = (funcArgs.result?.results[0].value.content as List).elements as Result[];
-        let args = (frames[0].value.content as Tuple).fields.args.content.elements as Result[];
-
-        let outs: Promise<Output>[] = args.map(async arg => {
-            let name = this.fromStr(arg.value.content as string);
-            return this.miConnection.varCreate(name);
-        });
-
-        let outputs: Value[] = [];
-        for (let out of outs) {
-            let tuple = new Tuple((await out).result?.results as Result[]);
-            outputs.push(new Value(tuple));
-        }
-
-        return outputs;
-    }
-
-    async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request) {
-        let isForComplexType = args.variablesReference >= VAR_HANDLES_START;
+    async variablesRequest(response: DebugProtocol.VariablesResponse, varArgs: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request) {
+        let isForComplexType = varArgs.variablesReference >= VAR_HANDLES_START;
 
         if (isForComplexType) {
             let fields: Variable[] = [];
-            let varName = this.varHandles.get(args.variablesReference);
-            let childrenResults = (await this.miConnection.listChildren(varName)).result?.results;
-            // TODO: error if resultClass != done
+            let varName = this.varHandles.get(varArgs.variablesReference);
+            let childrenResults = await this.miConnection.listChildren(varName);
+            if (childrenResults instanceof MappingError) {
+                vscode.window.showInformationMessage(childrenResults.message);
+                return;
+            }
 
-            for (let elem of childrenResults!) {
-                if (elem.variable !== 'children') {
+            for (let child of childrenResults.children) {
+                let childName = child.exp;
+                let numChildren = child.numChild;
+                let varType = child.type;
+
+                let isPointer = varType.endsWith('*');
+                let isString = varType === 'char *';
+
+                // gdb terminology is pretty weird here, if we want to access
+                // mystruct.i, name is mystruct.i, but exp is just i
+                let expr = child.name;
+                let result = await this.miConnection.evaluate(expr);
+
+                let varRef = 0;
+                let varValue = '';
+
+                if (result.result?.resultClass !== ResultClass.Done) {
+                    console.log(result);
                     continue;
                 }
 
-                let children = elem.value.content as List;
-                for (let child of children.elements as Result[]) {
-                    let childTuple = child.value.content as Tuple;
-                    let childName = this.fromStr(childTuple.fields.exp.content);
-                    let numChildren = +this.fromStr(childTuple.fields.numchild.content);
-                    let varType = this.fromStr(childTuple.fields.type.content);
-
-                    let isPointer = varType.endsWith('*');
-                    let isString = varType === 'char *';
-
-                    let expr = this.fromStr(childTuple.fields.name.content);
-                    let result = await this.miConnection.evaluate(expr);
-
-                    let varRef = 0;
-                    let value = '';
-
-                    if (result.result?.resultClass !== ResultClass.Done) {
-                        console.log(result);
-                        continue;
-                    }
-
-                    let content = result.result?.results[0].value.content;
-                    let contentValue = '';
-                    if (typeof (content) === 'string') {
-                        contentValue = this.fromStr(content);
-                    }
-
-                    let isNull = isPointer && +contentValue === 0;
-
-                    if (isNull) {
-                        value = 'null';
-                    } else if (numChildren <= 0 || isString) {
-                        if (isString) {
-                            value = this.parseMiStringLiteral(contentValue);
-                        } else {
-                            value = contentValue;
-                        }
-                    } else {
-                        varRef = this.varHandles.create(expr);
-                    }
-
-                    fields.push(new Variable(childName, value, varRef));
+                let content = result.result?.results[0].value.content;
+                let contentValue = '';
+                if (typeof (content) === 'string') {
+                    contentValue = this.fromStr(content);
                 }
+
+                let isNull = isPointer && +contentValue === 0;
+
+                if (isNull) {
+                    varValue = 'null';
+                } else if (numChildren <= 0 || isString) {
+                    if (isString) {
+                        varValue = this.parseMiStringLiteral(contentValue);
+                    } else {
+                        varValue = contentValue;
+                    }
+                } else {
+                    varValue = child.type || '{...}';
+                    varRef = this.varHandles.create(expr);
+                }
+
+                fields.push(new Variable(childName, varValue, varRef));
             }
 
             response.body = {
@@ -351,54 +314,59 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
             return;
         }
 
-        let funcArgs = this.getFuncArgs();
-        let vars = await this.miConnection.listLocals();
-        let localsByName = new Map<string, Variable>();
+        const funcArgs = this.miConnection.listArgs();
+        const vars = await this.miConnection.listLocals();
+        if (vars instanceof MappingError) {
+            vscode.window.showInformationMessage(vars.message);
+            return;
+        }
 
-        if (vars.isDone()) {
-            let values = (vars.result?.results[0].value.content as List).elements as Value[];
-            let args = await funcArgs;
-            values = values.concat(args);
+        const localsByName = new Map<string, Variable>();
 
-            for (let value of values) {
-                let tuple = value.content as Tuple;
+        const args = await funcArgs;
+        if (args instanceof MappingError) {
+            vscode.window.showInformationMessage(args.message);
+            return;
+        }
 
-                let varName = this.fromStr(tuple.fields.name.content);
-                let varType = this.fromStr(tuple.fields.type.content);
-                let isPointer = varType.endsWith('*');
-                let isString = varType === 'char *';
+        const locals: VarInfo[] = (vars.locals as VarInfo[]).concat(args.args);
 
-                let varRef = 0;
-                let varValue = '';
+        for (let local of locals) {
+            const name = local.getName();
+            const isPointer = local.getType()?.endsWith('*');
+            const isString = local.getType() === 'char *';
 
-                if (isPointer) {
-                    let ptrValue = this.fromStr(tuple.fields.value.content);
-                    let isNull = isPointer && +ptrValue === 0;
+            let varRef = 0;
+            let varValue = '';
 
-                    if (isNull) {
-                        varValue = 'null';
-                    } else if (isString) {
-                        varValue = this.parseMiStringLiteral(ptrValue);
-                    } else {
-                        varValue = ptrValue;
-                        varRef = this.varHandles.create(varName);
-                    }
-                } else if (tuple.fields.value && tuple.fields.value.content !== '"{...}"') {
-                    // simple type
-                    varValue = this.fromStr(tuple.fields.value.content);
+            if (isPointer) {
+                let ptrValue: string = local.getValue() || '';
+                let isNull = isPointer && +ptrValue === 0;
+
+                if (isNull) {
+                    varValue = 'null';
+                } else if (isString) {
+                    varValue = this.parseMiStringLiteral(ptrValue);
                 } else {
-                    varRef = this.varHandles.create(varName);
+                    varValue = ptrValue;
+                    varRef = this.varHandles.create(name);
                 }
-
-                if (localsByName.get(varName)) {
-                    await this.miConnection.varDelete(varName);
-                }
-
-                await this.miConnection.varCreate(varName);
-                let v = new Variable(varName, varValue, varRef);
-
-                localsByName.set(varName, v);
+            } else if (local.getValue()) {
+                // simple type
+                varValue = local.getValue()!;
+            } else {
+                varValue = local.getType() || '{...}';
+                varRef = this.varHandles.create(name);
             }
+
+            if (localsByName.get(name)) {
+                await this.miConnection.varDelete(name);
+            }
+
+            await this.miConnection.varCreate(name);
+            let v = new Variable(name, varValue, varRef);
+
+            localsByName.set(name, v);
         }
 
         response.body = {
