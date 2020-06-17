@@ -1,3 +1,4 @@
 # vscode-kantan README
 
-It's pretty dope tbh
+VSCode support for the Kantan programming language.
+This plugin add syntax highlighting and debugger support for all .kan files
