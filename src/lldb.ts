@@ -263,17 +263,17 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
             }
 
             for (let child of childrenResults.children) {
-                let childName = child.exp;
-                let numChildren = child.numChild;
-                let varType = child.type;
+                const childName = child.exp;
+                const numChildren = child.numChild;
+                const varType = child.type;
 
-                let isPointer = varType.endsWith('*');
-                let isString = varType === 'char *';
+                const isPointer = varType.endsWith('*');
+                const isString = varType === 'char *';
 
                 // gdb terminology is pretty weird here, if we want to access
                 // mystruct.i, name is mystruct.i, but exp is just i
-                let expr = child.name;
-                let result = await this.miConnection.evaluate(expr);
+                const expr = child.name;
+                const result = await this.miConnection.evaluate(expr);
 
                 let varRef = 0;
                 let varValue = '';
@@ -339,28 +339,19 @@ export class LLDBDebugSession extends DebugSession implements OutputHandler {
             let varRef = 0;
             let varValue = '';
 
-            if (isPointer) {
-                let ptrValue: string = local.getValue() || '';
-                let isNull = isPointer && +ptrValue === 0;
-
-                if (isNull) {
-                    varValue = 'null';
-                } else if (isString) {
-                    varValue = this.parseMiStringLiteral(ptrValue);
-                } else {
-                    varValue = ptrValue;
-                    varRef = this.varHandles.create(name);
-                }
-            } else if (local.getValue()) {
+            if (local.getValue() && !isPointer) {
                 // simple type
                 varValue = local.getValue()!;
+            } else if (isString) {
+                varValue = local.getValue() || '';
+                varValue = this.parseMiStringLiteral(varValue);
             } else {
                 varValue = local.getType() || '{...}';
-                varRef = this.varHandles.create(name);
-            }
-
-            if (localsByName.get(name)) {
-                await this.miConnection.varDelete(name);
+                if (localsByName.get(name)) {
+                    await this.miConnection.varDelete(name);
+                } else {
+                    varRef = this.varHandles.create(name);
+                }
             }
 
             await this.miConnection.varCreate(name);

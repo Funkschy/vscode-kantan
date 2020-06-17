@@ -4,7 +4,7 @@
     "displayName": "vscode-kantan",
     "repository": "https://github.com/Funkschy/vscode-kantan",
     "description": "Support for the Kantan programming language",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "engines": {
         "vscode": "^1.45.0"
     },
