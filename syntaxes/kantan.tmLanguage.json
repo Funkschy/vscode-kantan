@@ -26,10 +26,19 @@
                     "include": "#extern-function-def"
                 },
                 {
+                    "include": "#export-function-def"
+                },
+                {
+                    "include": "#delegate-function-def"
+                },
+                {
                     "include": "#function-def"
                 },
                 {
                     "include": "#struct-def"
+                },
+                {
+                    "include": "#union-def"
                 },
                 {
                     "include": "#enum-def"
@@ -155,14 +164,51 @@
                 }
             }
         },
+        "export-function-def": {
+            "begin": "\\b(export)\\b\\s*(\\bdef\\b)\\s*([A-Za-z][A-Za-z0-9_]*)",
+            "end": ":?\\s*(\\**[A-Za-z][A-Za-z0-9_]*)?;",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.export.kantan"
+                },
+                "2": {
+                    "name": "keyword.def.kantan"
+                },
+                "3": {
+                    "name": "entity.name.function.kantan"
+                }
+            }
+        },
+        "delegate-function-def": {
+            "begin": "\\b(delegate)\\b\\s*(\\bdef\\b)\\s*([A-Za-z][A-Za-z0-9_]*)",
+            "end": ":?\\s*(\\**[A-Za-z][A-Za-z0-9_]*)?;",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.delegate.kantan"
+                },
+                "2": {
+                    "name": "keyword.def.kantan"
+                },
+                "3": {
+                    "name": "entity.name.function.kantan"
+                }
+            }
+        },
         "function-def": {
-            "begin": "^\\b(def)\\b\\s+([A-Za-z][A-Za-z0-9_]*)",
+            "begin": "^\\b(def)\\b(\\s+\\(.*\\))?\\s+([A-Za-z][A-Za-z0-9_]*)",
             "end": "(:\\s*)?(\\**[A-Za-z][A-Za-z0-9_.]*)?\\s*\\{",
             "beginCaptures": {
                 "1": {
                     "name": "keyword.def.kantan"
                 },
                 "2": {
+                    "patterns": [
+                        {
+                            "include": "#parameter"
+                        }
+                    ]
+                },
+                "3": {
                     "name": "entity.name.function.kantan"
                 }
             },
@@ -203,6 +249,29 @@
                 }
             ]
         },
+        "union-def": {
+            "begin": "\\b(type)\\b\\s+([A-Za-z][A-Za-z0-9_]*)\\s+\\b(union)\\b\\s*\\{",
+            "end": "}",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.type.kantan"
+                },
+                "2": {
+                    "name": "entity.name.type.kantan"
+                },
+                "3": {
+                    "name": "keyword.union.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#parameter"
+                },
+                {
+                    "include": "#comments"
+                }
+            ]
+        },
         "enum-def": {
             "begin": "\\b(type)\\b\\s+([A-Za-z][A-Za-z0-9_]*)\\s+\\b(enum)\\b\\s*\\{",
             "end": "}",
@@ -224,24 +293,27 @@
             ]
         },
         "parameter": {
-            "begin": "\\s*([A-Za-z][A-Za-z0-9_]*)\\s*:\\s*(\\**[A-Za-z][A-Za-z0-9_.]*)",
+            "begin": "\\s*([A-Za-z][A-Za-z0-9_]*)\\s*:\\s*([\\s\\*\\[\\]A-Za-z0-9_\\.]*)",
             "end": "\\)|,|}|\\n",
             "beginCaptures": {
                 "1": {
                     "name": "variable.name.kantan"
                 },
                 "2": {
-                    "name": "entity.name.type.kantan"
+                    "name": "entity.name.type.kantan",
+                    "patterns": [
+                        {
+                            "include": "#type-name"
+                        }
+                    ]
                 }
-            },
-            "patterns": [
-                {
-                    "include": "#expressions"
-                }
-            ]
+            }
+        },
+        "type-name": {
+            "match": "\\s*\\**(\\[.*\\])*_?[A-Za-z][A-Za-z0-9_\\.]*"
         },
         "var-decl": {
-            "begin": "\\b(let)\\b\\s+([A-Za-z][A-Za-z0-9_]*)",
+            "begin": "\\b(let)\\b\\s+([A-Za-z][A-Za-z0-9_]*)\\s*:?\\s*([\\s\\*\\[\\]A-Za-z0-9_\\.]*)?",
             "end": ";",
             "beginCaptures": {
                 "1": {
@@ -249,6 +321,14 @@
                 },
                 "2": {
                     "name": "variable.name.kantan"
+                },
+                "3": {
+                    "name": "entity.name.type.kantan",
+                    "patterns": [
+                        {
+                            "include": "#type-name"
+                        }
+                    ]
                 }
             },
             "patterns": [
@@ -268,6 +348,20 @@
             "patterns": [
                 {
                     "include": "#expressions"
+                }
+            ]
+        },
+        "defer": {
+            "begin": "\\b(defer)\\b",
+            "end": ";",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.defer.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#simple-statement"
                 }
             ]
         },
@@ -381,7 +475,7 @@
             "name": "constant.language.kantan"
         },
         "builtin-types": {
-            "match": "\\b(i32|f32|string|char)\\b",
+            "match": "\\b(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize|f32|f64|string|char|boo|voidl)\\b",
             "name": "entity.name.type.kantan"
         },
         "keywords": {
