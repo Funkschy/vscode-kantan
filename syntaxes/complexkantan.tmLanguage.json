@@ -1,0 +1,485 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Kantan",
+    "scopeName": "source.kan",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#declaration"
+        },
+        {
+            "include": "#builtin-types"
+        },
+        {
+            "include": "#statements"
+        }
+    ],
+    "repository": {
+        "declaration": {
+            "patterns": [
+                {
+                    "include": "#imports"
+                },
+                {
+                    "include": "#extern-function-def"
+                },
+                {
+                    "include": "#export-function-def"
+                },
+                {
+                    "include": "#delegate-function-def"
+                },
+                {
+                    "include": "#function-def"
+                },
+                {
+                    "include": "#struct-def"
+                },
+                {
+                    "include": "#union-def"
+                },
+                {
+                    "include": "#enum-def"
+                }
+            ]
+        },
+        "statements": {
+            "patterns": [
+                {
+                    "include": "#simple-statement"
+                },
+                {
+                    "include": "#compound-statement"
+                }
+            ]
+        },
+        "simple-statement": {
+            "patterns": [
+                {
+                    "include": "#var-decl"
+                },
+                {
+                    "include": "#delete"
+                },
+                {
+                    "include": "#return"
+                },
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "compound-statement": {
+            "patterns": [
+                {
+                    "include": "#block-statement"
+                },
+                {
+                    "include": "#while"
+                },
+                {
+                    "include": "#for"
+                },
+                {
+                    "include": "#if"
+                },
+                {
+                    "include": "#else"
+                }
+            ]
+        },
+        "block-statement": {
+            "patterns": [
+                {
+                    "include": "#statement"
+                }
+            ]
+        },
+        "expressions": {
+            "patterns": [
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#chars"
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#literals"
+                },
+                {
+                    "match": "\\bnew\\b",
+                    "name": "keyword.new.kantan"
+                },
+                {
+                    "match": "\\bas\\b",
+                    "name": "keyword.as.kantan"
+                }
+            ]
+        },
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.kantan",
+                    "begin": "(\\/\\/)",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.comment.kantan"
+                        }
+                    },
+                    "end": "(?:\\n|$)"
+                }
+            ]
+        },
+        "imports": {
+            "begin": "\\b(import)\\b\\s+",
+            "end": "[;\n]",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.import.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#strings"
+                }
+            ]
+        },
+        "extern-function-def": {
+            "begin": "\\b(extern)\\b\\s*(\\bdef\\b)\\s*([A-Za-z][A-Za-z0-9_]*)",
+            "end": ":?\\s*(\\**[A-Za-z][A-Za-z0-9_]*)?;",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.extern.kantan"
+                },
+                "2": {
+                    "name": "keyword.def.kantan"
+                },
+                "3": {
+                    "name": "entity.name.function.kantan"
+                }
+            }
+        },
+        "export-function-def": {
+            "begin": "\\b(export)\\b\\s*(\\bdef\\b)\\s*([A-Za-z][A-Za-z0-9_]*)",
+            "end": ":?\\s*(\\**[A-Za-z][A-Za-z0-9_]*)?;",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.export.kantan"
+                },
+                "2": {
+                    "name": "keyword.def.kantan"
+                },
+                "3": {
+                    "name": "entity.name.function.kantan"
+                }
+            }
+        },
+        "delegate-function-def": {
+            "begin": "\\b(delegate)\\b\\s*(\\bdef\\b)\\s*([A-Za-z][A-Za-z0-9_]*)",
+            "end": ":?\\s*(\\**[A-Za-z][A-Za-z0-9_]*)?;",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.delegate.kantan"
+                },
+                "2": {
+                    "name": "keyword.def.kantan"
+                },
+                "3": {
+                    "name": "entity.name.function.kantan"
+                }
+            }
+        },
+        "function-def": {
+            "begin": "^\\b(def)\\b(\\s+\\(.*\\))?\\s+([A-Za-z][A-Za-z0-9_]*)",
+            "end": "(:\\s*)?(\\**[A-Za-z][A-Za-z0-9_.]*)?\\s*\\{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.def.kantan"
+                },
+                "2": {
+                    "patterns": [
+                        {
+                            "include": "#parameter"
+                        }
+                    ]
+                },
+                "3": {
+                    "name": "entity.name.function.kantan"
+                }
+            },
+            "endCaptures": {
+                "2": {
+                    "name": "entity.name.type.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#parameter"
+                },
+                {
+                    "include": "#comments"
+                }
+            ]
+        },
+        "struct-def": {
+            "begin": "\\b(type)\\b\\s+([A-Za-z][A-Za-z0-9_]*)\\s+\\b(struct)\\b\\s*\\{",
+            "end": "}",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.type.kantan"
+                },
+                "2": {
+                    "name": "entity.name.type.kantan"
+                },
+                "3": {
+                    "name": "keyword.struct.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#parameter"
+                },
+                {
+                    "include": "#comments"
+                }
+            ]
+        },
+        "union-def": {
+            "begin": "\\b(type)\\b\\s+([A-Za-z][A-Za-z0-9_]*)\\s+\\b(union)\\b\\s*\\{",
+            "end": "}",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.type.kantan"
+                },
+                "2": {
+                    "name": "entity.name.type.kantan"
+                },
+                "3": {
+                    "name": "keyword.union.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#parameter"
+                },
+                {
+                    "include": "#comments"
+                }
+            ]
+        },
+        "enum-def": {
+            "begin": "\\b(type)\\b\\s+([A-Za-z][A-Za-z0-9_]*)\\s+\\b(enum)\\b\\s*\\{",
+            "end": "}",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.type.kantan"
+                },
+                "2": {
+                    "name": "entity.name.type.kantan"
+                },
+                "3": {
+                    "name": "keyword.enum.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#comments"
+                }
+            ]
+        },
+        "parameter": {
+            "begin": "\\s*([A-Za-z][A-Za-z0-9_]*)\\s*:\\s*([\\s\\*\\[\\]A-Za-z0-9_\\.]*)",
+            "end": "\\)|,|}|\\n",
+            "beginCaptures": {
+                "1": {
+                    "name": "variable.name.kantan"
+                },
+                "2": {
+                    "name": "entity.name.type.kantan",
+                    "patterns": [
+                        {
+                            "include": "#type-name"
+                        }
+                    ]
+                }
+            }
+        },
+        "type-name": {
+            "match": "\\s*\\**(\\[.*\\])*_?[A-Za-z][A-Za-z0-9_\\.]*"
+        },
+        "var-decl": {
+            "begin": "\\b(let)\\b\\s+([A-Za-z][A-Za-z0-9_]*)\\s*:?\\s*([\\s\\*\\[\\]A-Za-z0-9_\\.]*)?",
+            "end": ";",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.let.kantan"
+                },
+                "2": {
+                    "name": "variable.name.kantan"
+                },
+                "3": {
+                    "name": "entity.name.type.kantan",
+                    "patterns": [
+                        {
+                            "include": "#type-name"
+                        }
+                    ]
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "delete": {
+            "begin": "\\b(delete)\\b",
+            "end": ";",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.delete.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "defer": {
+            "begin": "\\b(defer)\\b",
+            "end": ";",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.defer.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#simple-statement"
+                }
+            ]
+        },
+        "return": {
+            "begin": "\\b(return)\\b",
+            "end": ";",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.return.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "while": {
+            "begin": "\\b(while)\\b",
+            "end": "{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.while.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                },
+                {
+                    "include": "#block-statement"
+                }
+            ]
+        },
+        "for": {
+            "begin": "\\b(for)\\b",
+            "end": "{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.for.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                },
+                {
+                    "include": "#simple-statement"
+                }
+            ]
+        },
+        "if": {
+            "begin": "\\b(else)?\\b\\s*\\b(if)\\b",
+            "end": "{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.else.kantan"
+                },
+                "2": {
+                    "name": "keyword.if.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "else": {
+            "begin": "\\b(else)\\b",
+            "end": "{",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.else.kantan"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expressions"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.kantan",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.kantan",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "chars": {
+            "name": "string.quoted.single.kantan",
+            "begin": "'",
+            "end": "'|(?<!\\\\)(?=\\s*\\n)",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.kantan",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "numbers": {
+            "match": "\\b((\\d+\\.?\\d+)|(\\d+))\\b",
+            "name": "constant.numeric.integer.kantan"
+        },
+        "literals": {
+            "match": "\\b(true|false|null|undefined)\\b",
+            "name": "constant.language.kantan"
+        },
+        "builtin-types": {
+            "match": "\\b(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize|f32|f64|string|char|boo|voidl)\\b",
+            "name": "entity.name.type.kantan"
+        },
+        "keywords": {
+            "patterns": []
+        }
+    }
+}
